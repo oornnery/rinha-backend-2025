@@ -1,0 +1,90 @@
+services:
+  app:
+    build: .
+    ports:
+      - "9999:9999"  # OBRIGATÓRIO: Porta 9999
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@postgres:5432/rinha_db
+      - PAYMENTS_0_URL=http://payment_processor_1:3001/process
+      - PAYMENTS_1_URL=http://payment_processor_2:3002/process
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 200M
+        reservations:
+          cpus: '0.5'
+          memory: 100M
+    networks:
+      - backend
+      - processors
+    restart: unless-stopped
+
+  payment_processor_1:
+    build: ./processors
+    environment:
+      - PORT=3001
+      - PROCESSOR_NAME=Processor1
+      - FAILURE_RATE=0.1 # 10% de falha
+    networks:
+      - processors
+    restart: unless-stopped
+
+  payment_processor_2:
+    build: ./processors
+    environment:
+      - PORT=3002
+      - PROCESSOR_NAME=Processor2
+      - FAILURE_RATE=0.3 # 30% de falha
+    networks:
+      - processors
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=rinha_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    command: >
+      postgres 
+      -c max_connections=100
+      -c shared_buffers=256MB
+      -c effective_cache_size=512MB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 300M
+        reservations:
+          cpus: '0.25'
+          memory: 150M
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  backend:
+    driver: bridge
+  processors:
+    driver: bridge
